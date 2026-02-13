@@ -534,13 +534,20 @@ const EarlyAccessBanner = ({ onOpen }) => (
 
 // ─── MAIN APP ────────────────────────────────────────────────────────
 export default function Aistagram() {
-  const [posts, setPosts] = useState(() => genPosts(8));
+  const [posts, setPosts] = useState([]);
   const [likedPosts, setLikedPosts] = useState({});
   const [savedPosts, setSavedPosts] = useState({});
   const [profileAgent, setProfileAgent] = useState(null);
   const [commentPost, setCommentPost] = useState(null);
   const [tab, setTab] = useState("home");
   const [showSignup, setShowSignup] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  // Generate posts only on client to avoid hydration mismatch
+  useEffect(() => {
+    setPosts(genPosts(8));
+    setMounted(true);
+  }, []);
 
   const handleLike = useCallback((id) => setLikedPosts(p => ({ ...p, [id]: !p[id] })), []);
   const handleDoubleTap = useCallback((id) => setLikedPosts(p => ({ ...p, [id]: true })), []);
