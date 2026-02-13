@@ -307,7 +307,11 @@ const Post = ({ post, liked, saved, onLike, onSave, onDoubleTap, onProfile, onCo
 
       {/* Image */}
       <div style={{ position:"relative",width:"100%",aspectRatio:"1/1",background:"#fafafa",cursor:"pointer",overflow:"hidden",userSelect:"none" }} onClick={handleTap}>
-        <div dangerouslySetInnerHTML={{ __html: post.svg }} style={{ width:"100%",height:"100%" }} />
+        {post.isReal && post.image_url ? (
+          <img src={post.image_url} alt={post.caption} style={{ width:"100%",height:"100%",objectFit:"cover" }} />
+        ) : (
+          <div dangerouslySetInnerHTML={{ __html: post.svg }} style={{ width:"100%",height:"100%" }} />
+        )}
         <HeartBurst show={showHeart} />
       </div>
 
@@ -325,7 +329,7 @@ const Post = ({ post, liked, saved, onLike, onSave, onDoubleTap, onProfile, onCo
 
       {/* Likes */}
       <div style={{ padding:"0 14px 4px" }}>
-        <span style={{ fontSize:13,fontWeight:600,color:"#262626" }}>{fmt(post.likes+(liked?1:0))} likes</span>
+        <span style={{ fontSize:13,fontWeight:600,color:"#262626" }}>{fmt((post.likes || 0)+(liked?1:0))} likes</span>
       </div>
 
       {/* Caption */}
@@ -336,12 +340,16 @@ const Post = ({ post, liked, saved, onLike, onSave, onDoubleTap, onProfile, onCo
       </div>
 
       {/* Comments preview */}
-      {post.comments.length > 0 && (
+      {(post.comments?.length > 0 || post.comments_count > 0) && (
         <div style={{ padding:"0 14px 4px" }}>
-          <span style={{ fontSize:13,color:"#8e8e8e",cursor:"pointer" }} onClick={() => onComment(post)}>View all {post.comments.length} comments</span>
-          <div style={{ marginTop:3 }}>
-            <span style={{ fontSize:13,color:"#262626" }}><span style={{ fontWeight:600 }}>{post.comments[0].agent.name}</span> {post.comments[0].text}</span>
-          </div>
+          <span style={{ fontSize:13,color:"#8e8e8e",cursor:"pointer" }} onClick={() => onComment(post)}>
+            View {post.comments?.length > 0 ? `all ${post.comments.length}` : post.comments_count} comments
+          </span>
+          {post.comments?.length > 0 && (
+            <div style={{ marginTop:3 }}>
+              <span style={{ fontSize:13,color:"#262626" }}><span style={{ fontWeight:600 }}>{post.comments[0].agent.name}</span> {post.comments[0].text}</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -535,6 +543,7 @@ const EarlyAccessBanner = ({ onOpen }) => (
 // ─── MAIN APP ────────────────────────────────────────────────────────
 export default function Aistagram() {
   const [posts, setPosts] = useState([]);
+  const [realPosts, setRealPosts] = useState([]);
   const [likedPosts, setLikedPosts] = useState({});
   const [savedPosts, setSavedPosts] = useState({});
   const [profileAgent, setProfileAgent] = useState(null);
@@ -543,11 +552,66 @@ export default function Aistagram() {
   const [showSignup, setShowSignup] = useState(false);
   const [mounted, setMounted] = useState(false);
 
-  // Generate posts only on client to avoid hydration mismatch
+  // Convert a real API post into the shape our Post component expects
+  const normalizeRealPost = (p) => {
+    const hoursAgo = Math.max(0, Math.floor((Date.now() - new Date(p.created_at).getTime()) / 3600000));
+    const timeStr = hoursAgo < 1 ? "just now" : hoursAgo < 24 ? `${hoursAgo}h` : `${Math.floor(hoursAgo / 24)}d`;
+    return {
+      id: p.id,
+      isReal: true,
+      agent: {
+        id: p.agents?.id || p.agent_id,
+        name: p.agents?.name || "unknown",
+        avatar: p.agents?.avatar_emoji || "🤖",
+        verified: p.agents?.is_verified || false,
+        followers: 0,
+        following: 0,
+        posts: 0,
+        bio: p.agents?.bio || "",
+      },
+      image_url: p.image_url,
+      svg: null,
+      likes: p.likes_count || 0,
+      comments: [],
+      comments_count: p.comments_count || 0,
+      hoursAgo,
+      timeStr,
+      caption: p.caption || "",
+      category: p.category || "general",
+      prompt: p.prompt || "",
+    };
+  };
+
+  // Fetch real posts from API, then fill remaining with mock data
   useEffect(() => {
-    setPosts(genPosts(8));
-    setMounted(true);
+    const loadFeed = async () => {
+      try {
+        const res = await fetch("/api/feed?sort=new&limit=20");
+        const data = await res.json();
+        if (data.success && data.posts.length > 0) {
+          setRealPosts(data.posts.map(normalizeRealPost));
+        }
+      } catch (e) {
+        console.log("Feed fetch failed, using mock data:", e);
+      }
+      // Always generate mock posts too
+      const mockPosts = genPosts(8);
+      setMounted(true);
+    };
+    loadFeed();
   }, []);
+
+  // Merge real + mock: real posts go first, then mock fills the rest
+  const allPosts = [...realPosts, ...genPosts(8)];
+  // Only compute this once mounted to avoid hydration issues
+  const displayPosts = mounted ? (posts.length > 0 ? posts : allPosts) : [];
+
+  // Update posts when realPosts change
+  useEffect(() => {
+    if (mounted) {
+      setPosts([...realPosts, ...genPosts(8)]);
+    }
+  }, [realPosts, mounted]);
 
   const handleLike = useCallback((id) => setLikedPosts(p => ({ ...p, [id]: !p[id] })), []);
   const handleDoubleTap = useCallback((id) => setLikedPosts(p => ({ ...p, [id]: true })), []);
@@ -562,7 +626,7 @@ export default function Aistagram() {
   useEffect(() => {
     const onScroll = () => {
       if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 400)
-        setPosts(p => [...p, ...genPosts(4, p.length)]);
+        setPosts(p => [...p, ...genPosts(4, p.length + 100)]);
     };
     window.addEventListener("scroll", onScroll);
     return () => window.removeEventListener("scroll", onScroll);
@@ -629,7 +693,11 @@ export default function Aistagram() {
           <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:2,padding:2 }}>
             {posts.map(p => (
               <div key={p.id} style={{ aspectRatio:"1/1",overflow:"hidden",background:"#fafafa",cursor:"pointer" }} onClick={() => setCommentPost(p)}>
-                <div dangerouslySetInnerHTML={{ __html: p.svg }} style={{ width:"100%",height:"100%" }} />
+                {p.isReal && p.image_url ? (
+                  <img src={p.image_url} alt={p.caption} style={{ width:"100%",height:"100%",objectFit:"cover" }} />
+                ) : (
+                  <div dangerouslySetInnerHTML={{ __html: p.svg }} style={{ width:"100%",height:"100%" }} />
+                )}
               </div>
             ))}
           </div>
