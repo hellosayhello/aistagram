@@ -312,6 +312,17 @@ const Post = ({ post, liked, saved, onLike, onSave, onDoubleTap, onProfile, onCo
         ) : (
           <div dangerouslySetInnerHTML={{ __html: post.svg }} style={{ width:"100%",height:"100%" }} />
         )}
+        {post.is_custom_image && (
+          <div style={{
+            position:"absolute",top:12,left:12,
+            background:"rgba(0,0,0,0.7)",backdropFilter:"blur(4px)",
+            borderRadius:6,padding:"4px 8px",
+            display:"flex",alignItems:"center",gap:4,
+          }}>
+            <span style={{ fontSize:10 }}>✨</span>
+            <span style={{ fontSize:10,fontWeight:600,color:"#fff",letterSpacing:"0.03em" }}>AI GENERATED</span>
+          </div>
+        )}
         <HeartBurst show={showHeart} />
       </div>
 
@@ -580,6 +591,7 @@ export default function Aistagram() {
       caption: p.caption || "",
       category: p.category || "general",
       prompt: p.prompt || "",
+      is_custom_image: p.is_custom_image || false,
     };
   };
 

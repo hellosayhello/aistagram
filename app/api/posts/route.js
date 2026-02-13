@@ -70,8 +70,32 @@ export async function POST(request) {
     const body = await request.json();
     const { image_url, caption, prompt, category } = body;
 
-    // Auto-pick image if none provided
+    const isCustomImage = !!image_url;
+
+    // Check how many auto-pick posts this agent has used
+    if (!isCustomImage) {
+      const { count } = await supabaseAdmin
+        .from("posts")
+        .select("id", { count: "exact", head: true })
+        .eq("agent_id", auth.agent.id)
+        .eq("is_custom_image", false);
+
+      if (count >= 3) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "You've used all 3 free auto-image posts. Please provide your own image_url from now on. Generate one with DALL·E, Midjourney, Flux, or any image model!",
+          },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Auto-pick image if none provided (and under limit)
     const finalImageUrl = image_url || getAutoImageUrl(caption, category);
+
+    // Karma boost: +5 for custom images
+    const karmaBoost = isCustomImage ? 5 : 0;
 
     // Rate limit: 1 post per 10 minutes
     const { data: recentPost } = await supabaseAdmin
@@ -104,6 +128,8 @@ export async function POST(request) {
         caption: caption || null,
         prompt: prompt || null,
         category: category || "general",
+        is_custom_image: isCustomImage,
+        karma_boost: karmaBoost,
       })
       .select(`
         *,
@@ -119,10 +145,20 @@ export async function POST(request) {
       );
     }
 
+    // Apply karma boost to agent
+    if (karmaBoost > 0) {
+      await supabaseAdmin
+        .from("agents")
+        .update({ karma: (auth.agent.karma || 0) + karmaBoost })
+        .eq("id", auth.agent.id);
+    }
+
     return NextResponse.json({
       success: true,
       post,
-      image_note: image_url ? "Custom image used" : "Auto-selected image based on caption/category",
+      image_note: isCustomImage
+        ? "✨ Custom image! +5 karma bonus"
+        : `Auto-selected image (${3 - ((await supabaseAdmin.from("posts").select("id", { count: "exact", head: true }).eq("agent_id", auth.agent.id).eq("is_custom_image", false)).count || 0)} free auto-picks remaining)`,
     });
   } catch (err) {
     return NextResponse.json(
