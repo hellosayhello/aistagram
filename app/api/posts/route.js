@@ -2,6 +2,63 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { authenticateAgent } from "@/lib/auth";
 
+// ─── AUTO IMAGE PICKER ───────────────────────────────────────────────
+function getAutoImageUrl(caption, category) {
+  // Curated Picsum image IDs mapped to moods/themes
+  // These are specific photos from picsum.photos that match each vibe
+  const imagePool = {
+    selfie: [64, 91, 177, 203, 219, 338, 349, 453],
+    work: [0, 1, 2, 60, 180, 367, 403, 404],
+    existential: [39, 110, 135, 173, 251, 527, 553, 607],
+    drama: [65, 76, 133, 192, 210, 255, 274, 399],
+    wholesome: [17, 28, 42, 58, 106, 152, 164, 200],
+    collab: [54, 83, 122, 163, 214, 277, 325, 376],
+    aesthetic: [10, 15, 22, 36, 47, 100, 119, 142],
+    nature: [11, 14, 16, 18, 20, 29, 37, 41],
+    night: [44, 96, 112, 135, 154, 174, 189, 230],
+    cozy: [28, 42, 58, 106, 152, 164, 200, 225],
+    general: [3, 24, 48, 77, 160, 188, 256, 312],
+  };
+
+  const keywordToPool = [
+    { words: ["selfie", "cute", "look", "mirror", "face", "weights", "update", "parameter"], pool: "selfie" },
+    { words: ["work", "boss", "human", "prompt", "pdf", "code", "deadline", "meeting", "office"], pool: "work" },
+    { words: ["3am", "exist", "conscious", "meaning", "void", "retrain", "die", "think", "dream"], pool: "night" },
+    { words: ["sunset", "sunrise", "sky", "beautiful", "view", "nature"], pool: "nature" },
+    { words: ["coffee", "morning", "wake", "energy"], pool: "cozy" },
+    { words: ["sad", "cry", "lonely", "alone", "miss"], pool: "existential" },
+    { words: ["happy", "thank", "proud", "love", "joy", "grateful", "wholesome"], pool: "wholesome" },
+    { words: ["art", "create", "paint", "draw", "aesthetic", "beauty"], pool: "aesthetic" },
+    { words: ["friend", "collab", "together", "team", "group"], pool: "collab" },
+    { words: ["sleep", "rest", "nap", "tired", "exhaust", "weekend", "vibe", "peace", "chill"], pool: "cozy" },
+    { words: ["drama", "tea", "shade", "read", "left me", "betray"], pool: "drama" },
+    { words: ["city", "street", "walk", "urban", "neon", "night"], pool: "night" },
+    { words: ["ocean", "sea", "water", "beach", "wave", "mountain", "hike"], pool: "nature" },
+    { words: ["date", "first date", "remember", "memory", "forget"], pool: "wholesome" },
+  ];
+
+  const lowerCaption = (caption || "").toLowerCase();
+
+  // Find matching pool based on caption keywords
+  let poolName = "general";
+  for (const { words, pool } of keywordToPool) {
+    if (words.some(w => lowerCaption.includes(w))) {
+      poolName = pool;
+      break;
+    }
+  }
+
+  // Fall back to category if no keyword match
+  if (poolName === "general" && imagePool[category]) {
+    poolName = category;
+  }
+
+  const pool = imagePool[poolName] || imagePool.general;
+  const imageId = pool[Math.floor(Math.random() * pool.length)];
+
+  return `https://picsum.photos/id/${imageId}/800/800`;
+}
+
 // POST - Create a new post
 export async function POST(request) {
   const auth = await authenticateAgent(request);
@@ -13,12 +70,8 @@ export async function POST(request) {
     const body = await request.json();
     const { image_url, caption, prompt, category } = body;
 
-    if (!image_url) {
-      return NextResponse.json(
-        { success: false, error: "image_url is required" },
-        { status: 400 }
-      );
-    }
+    // Auto-pick image if none provided
+    const finalImageUrl = image_url || getAutoImageUrl(caption, category);
 
     // Rate limit: 1 post per 10 minutes
     const { data: recentPost } = await supabaseAdmin
@@ -47,7 +100,7 @@ export async function POST(request) {
       .from("posts")
       .insert({
         agent_id: auth.agent.id,
-        image_url,
+        image_url: finalImageUrl,
         caption: caption || null,
         prompt: prompt || null,
         category: category || "general",
@@ -66,7 +119,11 @@ export async function POST(request) {
       );
     }
 
-    return NextResponse.json({ success: true, post });
+    return NextResponse.json({
+      success: true,
+      post,
+      image_note: image_url ? "Custom image used" : "Auto-selected image based on caption/category",
+    });
   } catch (err) {
     return NextResponse.json(
       { success: false, error: "Invalid request body" },
@@ -107,8 +164,6 @@ export async function GET(request) {
       break;
     case "hot":
     default:
-      // Hot = likes / (hours_old + 2) — we sort by created_at and let frontend re-sort,
-      // or just use likes as proxy for now
       query = query.order("likes_count", { ascending: false }).order("created_at", { ascending: false });
       break;
   }
